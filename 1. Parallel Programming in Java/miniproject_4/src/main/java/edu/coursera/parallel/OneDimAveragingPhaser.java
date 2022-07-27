@@ -110,6 +110,58 @@ public final class OneDimAveragingPhaser {
     public static void runParallelFuzzyBarrier(final int iterations,
             final double[] myNew, final double[] myVal, final int n,
             final int tasks) {
+        Phaser[] phs = new Phaser[tasks];
+        for(int i = 0; i < tasks; i++) {
+            phs[i] = new Phaser(1);
+        }
 
+        Thread[] threads = new Thread[tasks];
+
+        for (int ii = 0; ii < tasks; ii++) {
+            final int i = ii;
+
+            threads[ii] = new Thread(() -> {
+                double[] threadPrivateMyVal = myVal;
+                double[] threadPrivateMyNew = myNew;
+
+                final int chunkSize = (n + tasks - 1) / tasks;
+                final int left = (i * chunkSize) + 1;
+                int right = (left + chunkSize) - 1;
+                if (right > n) right = n;
+
+                for (int iter = 0; iter < iterations; iter++) {
+                    threadPrivateMyNew[left] = (threadPrivateMyVal[left - 1] + threadPrivateMyVal[left + 1]) / 2.0;
+                    threadPrivateMyNew[right] = (threadPrivateMyVal[right - 1] + threadPrivateMyVal[right + 1]) / 2.0;
+
+                    phs[i].arrive();
+
+                    for (int j = left+1; j <= right-1; j++) {
+                        threadPrivateMyNew[j] = (threadPrivateMyVal[j - 1]
+                            + threadPrivateMyVal[j + 1]) / 2.0;
+                    }
+
+                    if(i-1 >= 0) {
+                        phs[i-1].awaitAdvance(iter);
+                    }
+
+                    if(i+1 <= tasks-1) {
+                        phs[i+1].awaitAdvance(iter);
+                    }
+
+                    double[] temp = threadPrivateMyNew;
+                    threadPrivateMyNew = threadPrivateMyVal;
+                    threadPrivateMyVal = temp;
+                }
+            });
+            threads[ii].start();
+        }
+
+        for (int ii = 0; ii < tasks; ii++) {
+            try {
+                threads[ii].join();
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
     }
 }
