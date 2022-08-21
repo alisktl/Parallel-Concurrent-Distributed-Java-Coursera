@@ -1,13 +1,13 @@
 package edu.coursera.concurrent;
 
-import edu.coursera.concurrent.AbstractBoruvka;
-import edu.coursera.concurrent.SolutionToBoruvka;
 import edu.coursera.concurrent.boruvka.Edge;
 import edu.coursera.concurrent.boruvka.Component;
 
 import java.util.Queue;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * A parallel implementation of Boruvka's algorithm to compute a Minimum
@@ -28,7 +28,46 @@ public final class ParBoruvka extends AbstractBoruvka<ParBoruvka.ParComponent> {
     @Override
     public void computeBoruvka(final Queue<ParComponent> nodesLoaded,
             final SolutionToBoruvka<ParComponent> solution) {
-        throw new UnsupportedOperationException();
+        ParComponent component;
+
+        while ((component = nodesLoaded.poll()) != null) {
+            if (component.isDead) {
+                //already merged/processed
+                continue;
+            }
+
+            if (!component.lock.tryLock()) {
+                //another thread is working with n
+                continue;
+            }
+
+            final Edge<ParComponent> e = component.getMinEdge();
+            if (e == null) {
+                solution.setSolution(component);
+                break;
+            }
+
+            final ParComponent other = e.getOther(component);
+            if (other.isDead) {
+                component.lock.unlock();
+                nodesLoaded.add(component);
+                continue;
+            }
+
+            if (!other.lock.tryLock()) {
+                component.lock.unlock();
+                nodesLoaded.add(component);
+                continue;
+            }
+
+            other.isDead = true;
+            component.merge(other, e.weight());
+
+            component.lock.unlock();
+            other.lock.unlock();
+
+            nodesLoaded.add(component);
+        }
     }
 
     /**
@@ -37,6 +76,9 @@ public final class ParBoruvka extends AbstractBoruvka<ParBoruvka.ParComponent> {
      * result of collapsing edges to form a component from multiple nodes.
      */
     public static final class ParComponent extends Component<ParComponent> {
+
+        private final Lock lock = new ReentrantLock(true);
+
         /**
          *  A unique identifier for this component in the graph that contains
          *  it.
